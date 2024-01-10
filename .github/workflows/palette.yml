@@ -1,0 +1,20 @@
+name: Bet you know
+
+on:
+  schedule:
+    - cron: '0 2 * * 1-5' # Workflow runs at 10:00 AM Beijing time on weekdays
+
+  workflow_dispatch: # Manual trigger
+
+jobs:
+  build:
+    runs-on: self-hosted
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        submodules: true
+
+    - name: Create build directory
+      run: cd $GITHUB_WORKSPACE && mkdir build && pwd && cd build && cmake .. && ninja
