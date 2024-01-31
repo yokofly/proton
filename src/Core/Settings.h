@@ -624,6 +624,7 @@ static constexpr UInt64 operator""_GiB(unsigned long long value)
     M(TransactionsWaitCSNMode, wait_changes_become_visible_after_commit_mode, TransactionsWaitCSNMode::WAIT_UNKNOWN, "Wait for committed changes to become actually visible in the latest snapshot", 0) \
     M(Bool, optimize_distinct_in_order, true, "Enable DISTINCT optimization if some columns in DISTINCT form a prefix of sorting. For example, prefix of sorting key in merge tree or ORDER BY statement", 0) \
     M(Bool, optimize_sorting_by_input_stream_properties, true, "Optimize sorting by sorting properties of input stream", 0) \
+    M(UInt64, extract_kvp_max_pairs_per_row, 1000, "Max number pairs that can be produced by extractKeyValuePairs function. Used to safeguard against consuming too much memory.", 0) \
     \
     /** proton: starts */                       \
     M(String, shards, "", "If not empty, only the specified shard IDs (or partition IDs if the target stream is a Kafka external stream) will be selected to be read data from. IDs are separated by comma. Example: shards='0,2'", 0) \
@@ -808,7 +809,7 @@ static constexpr UInt64 operator""_GiB(unsigned long long value)
     M(UInt64, javascript_uda_max_concurrency, 1, "Control the concurrency of JavaScript UDA in a query", 0) \
     M(Float, replay_speed, 0., "Control the replay speed..0 < replay_speed < 1, means replay slower.replay_speed == 1, means replay by actual ingest interval.1 < replay_speed < <max_limit>, means replay faster", 0) \
     M(UInt64, max_events, 0, "Total events to generate for random stream", 0) \
-    M(Int64, eps, -1, "control the random stream eps in query time, defalut value is -1, if it is 0 means no limit.", 0) \
+    M(Float, eps, -1., "control the random stream eps in query time, defalut value is -1, if it is 0 means no limit.", 0) \
 // End of GLOBAL_SETTINGS
 
 #define CONFIGURABLE_GLOBAL_SETTINGS(M) \
