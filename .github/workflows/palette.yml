@@ -18,7 +18,7 @@ jobs:
 
     - name: Create build directory
       run: cd $GITHUB_WORKSPACE && mkdir build && pwd && cd build && \
-       CC=$(brew --prefix llvm@15)/bin/clang && \
-       CXX=$(brew --prefix llvm@15)/bin/clang++ && \
-       PATH=$(brew --prefix llvm@15)/bin:$PATH && \
+       CC=$(brew --prefix llvm@15)/bin/clang \
+       CXX=$(brew --prefix llvm@15)/bin/clang++ \
+       PATH=$(brew --prefix llvm@15)/bin:$PATH \
        cmake .. && ninja
