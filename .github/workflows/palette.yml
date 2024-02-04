@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: self-hosted
 
     steps:
     - name: Checkout repository
@@ -17,7 +17,4 @@ jobs:
         submodules: true
 
     - name: Create build directory
-      run: cd $GITHUB_WORKSPACE && mkdir build && pwd && cd build && \
-       CC=clang \
-       CXX=clang++ \
-       cmake .. && ninja
+      run: cd $GITHUB_WORKSPACE && mkdir build && pwd && cd build && cmake .. && ninja
