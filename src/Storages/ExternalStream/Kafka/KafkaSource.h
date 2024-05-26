@@ -4,7 +4,7 @@
 #include <IO/ReadBufferFromMemory.h>
 #include <Processors/Streaming/ISource.h>
 #include <Storages/ExternalStream/ExternalStreamCounter.h>
-#include <Storages/ExternalStream/Kafka/ConsumerPool.h>
+#include <Storages/ExternalStream/Kafka/Consumer.h>
 #include <Storages/ExternalStream/Kafka/Topic.h>
 #include <Storages/IStorage.h>
 #include <Storages/StorageSnapshot.h>
@@ -23,10 +23,11 @@ public:
         Kafka & kafka_,
         const Block & header_,
         const StorageSnapshotPtr & storage_snapshot_,
-        RdKafka::ConsumerPool::Entry consumer_,
+        std::shared_ptr<RdKafka::Consumer> consumer_,
         RdKafka::TopicPtr topic_,
         Int32 shard_,
         Int64 offset_,
+        std::optional<Int64> high_watermark_,
         size_t max_block_size_,
         ExternalStreamCounterPtr external_stream_counter_,
         ContextPtr query_context_);
@@ -39,12 +40,11 @@ public:
 
     Chunk generate() override;
 
-    Int64 lastProcessedSN() const override { return ckpt_data.last_sn; }
-
 private:
     void calculateColumnPositions();
     void initFormatExecutor();
 
+    /// \brief Parse a Kafka message.
     void parseMessage(void * kmessage, size_t total_count, void * data);
     void parseFormat(const rd_kafka_message_s * kmessage);
 
@@ -74,35 +74,22 @@ private:
     bool request_virtual_columns = false;
 
     std::optional<String> format_error;
-    std::vector<Chunk> result_chunks;
-    std::vector<Chunk>::iterator iter;
+    std::vector<std::pair<Chunk, Int64>> result_chunks_with_sns;
+    std::vector<std::pair<Chunk, Int64>>::iterator iter;
     MutableColumns current_batch;
 
     UInt32 record_consume_batch_count = 1000;
     Int32 record_consume_timeout_ms = 100;
 
-    RdKafka::ConsumerPool::Entry consumer;
+    std::shared_ptr<RdKafka::Consumer> consumer;
     RdKafka::TopicPtr topic;
     Int32 shard;
     Int64 offset;
+    Int64 high_watermark;
 
+    /// Indicates that the source has already consumed all messages it is supposed to read [for non-streaming queries].
+    bool reached_the_end = false;
     bool consume_started = false;
-
-    /// For checkpoint
-    struct State
-    {
-        void serialize(WriteBuffer & wb) const;
-        void deserialize(VersionType version, ReadBuffer & rb);
-
-        static constexpr VersionType VERSION = 0; /// Current State Version
-
-        /// For VERSION-0
-        const String & topic;
-        Int32 partition;
-        Int64 last_sn = -1;
-
-        State(const String & topic_, Int32 partition_) : topic(topic_), partition(partition_) { }
-    } ckpt_data;
 
     ExternalStreamCounterPtr external_stream_counter;
 

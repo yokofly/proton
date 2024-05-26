@@ -1,20 +1,15 @@
-#include <Common/logger_useful.h>
 #include <Poco/Logger.h>
 #include <Storages/ExternalStream/Kafka/Consumer.h>
 
 namespace DB
 {
 
-namespace ErrorCodes
-{
-extern const int RESOURCE_NOT_FOUND;
-}
-
 namespace RdKafka
 {
 
 /// Consumer will take the ownership of `rk_conf`.
-Consumer::Consumer(const rd_kafka_conf_t & rk_conf, UInt64 poll_timeout_ms, Poco::Logger * logger_) : logger(logger_)
+Consumer::Consumer(const rd_kafka_conf_t & rk_conf, UInt64 poll_timeout_ms_, const String & logger_name_prefix)
+: poll_timeout_ms(poll_timeout_ms_)
 {
     char errstr[512];
     auto * conf = rd_kafka_conf_dup(&rk_conf);
@@ -27,12 +22,17 @@ Consumer::Consumer(const rd_kafka_conf_t & rk_conf, UInt64 poll_timeout_ms, Poco
         throw Exception(klog::mapErrorCode(rd_kafka_last_error()), "Failed to create kafka handle: {}", errstr);
     }
 
-    LOG_INFO(logger, "Created consumer {}", name());
-
-    poller.scheduleOrThrowOnError([this, poll_timeout_ms] { backgroundPoll(poll_timeout_ms); });
+    logger = &Poco::Logger::get(fmt::format("{}.{}", logger_name_prefix, name()));
+    LOG_INFO(logger, "Created consumer");
 }
 
-void Consumer::backgroundPoll(UInt64 poll_timeout_ms) const
+Consumer::~Consumer()
+{
+    setStopped();
+    poller.wait();
+}
+
+void Consumer::backgroundPoll() const
 {
     LOG_INFO(logger, "Start consumer poll");
 
@@ -49,6 +49,9 @@ std::vector<Int64> Consumer::getOffsetsForTimestamps(const std::string & topic, 
 
 void Consumer::startConsume(Topic & topic, Int32 parition, Int64 offset)
 {
+    if (!started.test_and_set())
+        poller.scheduleOrThrowOnError([this] { backgroundPoll(); });
+
     auto res = rd_kafka_consume_start(topic.getHandle(), parition, offset);
     if (res == -1)
     {
@@ -67,8 +70,10 @@ void Consumer::stopConsume(Topic & topic, Int32 parition)
     }
 }
 
-void Consumer::consumeBatch(Topic & topic, Int32 partition, uint32_t count, int32_t timeout_ms, Consumer::Callback callback, ErrorCallback error_callback) const
+Int64 Consumer::consumeBatch(Topic & topic, Int32 partition, uint32_t count, int32_t timeout_ms, Consumer::Callback callback, ErrorCallback error_callback) const
 {
+    Int64 last_offset = -1;
+
     std::unique_ptr<rd_kafka_message_t *, decltype(free) *> rkmessages
     {
         static_cast<rd_kafka_message_t **>(malloc(sizeof(rd_kafka_message_t *) * count)), free
@@ -79,7 +84,7 @@ void Consumer::consumeBatch(Topic & topic, Int32 partition, uint32_t count, int3
     if (res < 0)
     {
         error_callback(rd_kafka_last_error());
-        return;
+        return last_offset;
     }
 
     for (ssize_t idx = 0; idx < res; ++idx)
@@ -101,8 +106,11 @@ void Consumer::consumeBatch(Topic & topic, Int32 partition, uint32_t count, int3
                 topic.name(), partition, DB::getCurrentExceptionMessage(true, true));
         }
 
+        last_offset = rkmessage->offset;
         rd_kafka_message_destroy(rkmessage);
     }
+
+    return last_offset;
 }
 
 }

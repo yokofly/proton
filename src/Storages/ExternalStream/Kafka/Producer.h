@@ -14,22 +14,25 @@ namespace RdKafka
 class Producer : boost::noncopyable
 {
 public:
-    Producer(const rd_kafka_conf_t & rk_conf, UInt64 poll_timeout_ms, Poco::Logger * logger_);
-    ~Producer()
-    {
-        stopped.test_and_set();
-    }
+    Producer(const rd_kafka_conf_t & rk_conf, UInt64 poll_timeout_ms, const String & logger_name_prefix);
+    ~Producer();
 
     rd_kafka_t * getHandle() const { return rk.get(); }
 
-private:
     std::string name() const { return rd_kafka_name(rk.get()); }
+
+    void setStopped() { stopped.test_and_set(); }
+
+    bool isStopped() const { return stopped.test(); }
+
+private:
     void backgroundPoll(UInt64 poll_timeout_ms) const;
 
     klog::KafkaPtr rk {nullptr, rd_kafka_destroy};
     ThreadPool poller;
-    std::atomic_flag stopped;
     Poco::Logger * logger;
+
+    std::atomic_flag stopped;
 };
 
 }

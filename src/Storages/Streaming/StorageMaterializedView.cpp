@@ -58,6 +58,11 @@ extern const int DIRECTORY_DOESNT_EXIST;
 extern const int UNEXPECTED_ERROR_CODE;
 }
 
+namespace
+{
+constexpr size_t DEFAULT_MAX_RETRY_TIME = 6;
+constexpr size_t DEFAULT_RECOVER_RETRY_FOR_SN_FAILURE = 3;
+}
 
 namespace
 {
@@ -99,7 +104,7 @@ std::vector<Int64> getCheckpointedSNOfStreamingSources(const Streaming::Streamin
     std::vector<Int64> sns;
     sns.reserve(streaming_sources.size());
     for (const auto & streaming_source : streaming_sources)
-        sns.emplace_back(streaming_source->lastCheckpointedSN());
+        sns.emplace_back(streaming_source->lastCheckpointSN());
 
     return sns;
 }
@@ -111,7 +116,7 @@ String dumpStreamingSourcesWithSNs(const Streaming::StreamingSourcePtrs & stream
     if (sns.empty())
     {
         for (const auto & streaming_source : streaming_sources)
-            wb << streaming_source->getName() << "(" << streaming_source->description() << ",sn=" << streaming_source->lastCheckpointedSN()
+            wb << streaming_source->getName() << "(" << streaming_source->description() << ",sn=" << streaming_source->lastCheckpointSN()
                << ");";
     }
     else
@@ -122,7 +127,7 @@ String dumpStreamingSourcesWithSNs(const Streaming::StreamingSourcePtrs & stream
         /// Use last checkpointed sn instead of invalid sn
         for (auto && [streaming_source, sn] : std::views::zip(streaming_sources, sns))
             wb << streaming_source->getName() << "(" << streaming_source->description()
-               << ",sn=" << (sn >= 0 ? sn : streaming_source->lastCheckpointedSN()) << ");";
+               << ",sn=" << (sn >= 0 ? sn : streaming_source->lastCheckpointSN()) << ");";
     }
 
     return wb.str();
@@ -350,6 +355,12 @@ void StorageMaterializedView::shutdown()
     if (shutdown_called.test_and_set())
         return;
 
+    /// Wake up the thread waiting
+    {
+        std::lock_guard<std::mutex> lock(wait_cv_mutex);
+        wait_cv.notify_all();
+    }
+
     background_state.terminate();
 
     auto storage_id = getStorageID();
@@ -358,6 +369,14 @@ void StorageMaterializedView::shutdown()
         DatabaseCatalog::instance().removeDependency(select_table_id, storage_id);
 
     DatabaseCatalog::instance().removeDependency(target_table_id, storage_id);
+}
+
+template <typename Duration>
+void StorageMaterializedView::waitFor(Duration && duration)
+{
+    /// No care of spurious awakenings
+    std::unique_lock lock(wait_cv_mutex);
+    wait_cv.wait_for(lock, std::forward<Duration>(duration));
 }
 
 void StorageMaterializedView::checkDependencies() const
@@ -481,7 +500,7 @@ void StorageMaterializedView::initBackgroundState()
                         bool log_error = (retry_times > 1);
                         background_state.setException(
                             err_code, fmt::format("{}, {}th wait for ready", getExceptionMessage(e, true), retry_times), log_error);
-                        std::this_thread::sleep_for(recheck_dependencies_interval);
+                        waitFor(recheck_dependencies_interval);
                     }
                     else if (err_code == ErrorCodes::DIRECTORY_DOESNT_EXIST)
                     {
@@ -506,24 +525,30 @@ void StorageMaterializedView::initBackgroundState()
                                 background_state.setException(
                                     err_code,
                                     fmt::format(
-                                        "Wait for {}th recovering background pipeline from {}. Background runtime error: {}. "
-                                        "processed_sns={} checkpointed_sns={}",
+                                        "Wait for {}th recovering background pipeline from {}, processed_sns={} checkpointed_sns={}. "
+                                        "Background runtime error: {}",
                                         retry_times,
                                         dumpStreamingSourcesWithSNs(streaming_sources, /*recover_from_checkpointed*/ {}),
-                                        getExceptionMessage(e, true),
                                         dumpSNs(getProcessedSNOfStreamingSources(streaming_sources)),
-                                        dumpSNs(getCheckpointedSNOfStreamingSources(streaming_sources))));
+                                        dumpSNs(getCheckpointedSNOfStreamingSources(streaming_sources)),
+                                        getExceptionMessage(e, true)));
 
                                 /// For some queries that always go wrong, we don’t want to recover too frequently. Now wait 5s, 10s, 15s, ... 30s, 30s for each time
-                                std::this_thread::sleep_for(recover_interval * std::min<size_t>(retry_times, 6));
+                                waitFor(recover_interval * std::min<size_t>(retry_times, DEFAULT_MAX_RETRY_TIME));
                                 break;
                             }
                             case RecoveryPolicy::BestEffort:
                             {
                                 auto current_failed_sns = getProcessedSNOfStreamingSources(streaming_sources);
                                 recover_sns.clear();
-                                /// If the current SN fails three times in a row, we will skipping some SNs and recover from the next SN to avoid permanent recovery.
-                                if (failed_sn_queue.size() >= 2)
+
+                                /// If the current SN fails three times(can be adjusted in config) in a row, we will skipping some SNs and recover from the next SN to avoid permanent recovery.
+                                size_t recovery_retry_from_settings = local_context->getSettingsRef().recovery_retry_for_sn_failure;
+                                size_t recover_retry_times = DEFAULT_RECOVER_RETRY_FOR_SN_FAILURE;
+                                if (recovery_retry_from_settings > 0)
+                                    recover_retry_times = recovery_retry_from_settings;
+
+                                if (failed_sn_queue.size() >= recover_retry_times - 1)
                                 {
                                     recover_sns.reserve(current_failed_sns.size());
                                     for (size_t i = 0; i < current_failed_sns.size(); ++i)
@@ -541,17 +566,17 @@ void StorageMaterializedView::initBackgroundState()
                                 background_state.setException(
                                     err_code,
                                     fmt::format(
-                                        "Wait for {}th recovering background pipeline from {}. Background runtime error: {}. "
-                                        "processed_sns={} checkpointed_sns={}",
+                                        "Wait for {}th recovering background pipeline from {}, processed_sns={} checkpointed_sns={}. "
+                                        "Background runtime error: {}",
                                         retry_times,
                                         dumpStreamingSourcesWithSNs(streaming_sources, recover_sns),
-                                        getExceptionMessage(e, true),
                                         dumpSNs(current_failed_sns),
-                                        dumpSNs(getCheckpointedSNOfStreamingSources(streaming_sources))));
+                                        dumpSNs(getCheckpointedSNOfStreamingSources(streaming_sources)),
+                                        getExceptionMessage(e, true)));
 
                                 failed_sn_queue.emplace_back(std::move(current_failed_sns));
 
-                                std::this_thread::sleep_for(recover_interval);
+                                waitFor(recover_interval);
                                 break;
                             }
                         }
@@ -853,12 +878,15 @@ void StorageMaterializedView::createInnerTable()
     {
         try
         {
+            if (shutdown_called.test(std::memory_order_relaxed))
+                return;
+
             doCreateInnerTable(metadata_snapshot, local_context);
             return;
         }
         catch (...)
         {
-            std::this_thread::sleep_for(std::chrono::seconds(2));
+            waitFor(std::chrono::seconds(2));
             LOG_DEBUG(log, "'{}' waiting for inner stream ready", getStorageID().getFullTableName());
         }
     }
