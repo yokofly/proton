@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: self-hosted
+    runs-on: macos-14
 
     steps:
     - name: Checkout repository
@@ -17,4 +17,6 @@ jobs:
         submodules: true
 
     - name: Create build directory
-      run: cd $GITHUB_WORKSPACE && mkdir build && pwd && cd build && cmake .. && ninja
+      run: cd $GITHUB_WORKSPACE && mkdir build && pwd && cd build && export CC=$(brew --prefix llvm@15)/bin/clang && 
+           export CXX=$(brew --prefix llvm@15)/bin/clang++ && 
+           export PATH=$(brew --prefix llvm@15)/bin:$PATH && cmake .. && ninja
