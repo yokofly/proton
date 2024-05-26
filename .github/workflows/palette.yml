@@ -12,11 +12,14 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
+        fetch-depth: 1
         submodules: true
 
     - name: Create build directory
-      run: cd $GITHUB_WORKSPACE && mkdir build && pwd && cd build && export CC=$(brew --prefix llvm@15)/bin/clang && 
-           export CXX=$(brew --prefix llvm@15)/bin/clang++ && 
-           export PATH=$(brew --prefix llvm@15)/bin:$PATH && cmake .. && ninja
+      run: cd $GITHUB_WORKSPACE && mkdir build && pwd && cd build &&
+           brew install ccache cmake ninja libtool gettext llvm@16 gcc binutils grep findutils libiconv &&
+           export CC=$(brew --prefix llvm@16)/bin/clang && 
+           export CXX=$(brew --prefix llvm@16)/bin/clang++ && 
+           export PATH=$(brew --prefix llvm@16)/bin:$PATH && cmake .. && ninja
