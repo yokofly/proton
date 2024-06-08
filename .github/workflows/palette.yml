@@ -18,8 +18,24 @@ jobs:
         submodules: true
 
     - name: Create build directory
-      run: cd $GITHUB_WORKSPACE && mkdir build && pwd && cd build &&
-           brew install ccache cmake ninja libtool gettext llvm@16 gcc binutils grep findutils libiconv &&
-           export CC=$(brew --prefix llvm@16)/bin/clang && 
-           export CXX=$(brew --prefix llvm@16)/bin/clang++ && 
-           export PATH=$(brew --prefix llvm@16)/bin:$PATH && cmake .. && ninja
+      run: |
+        cd $GITHUB_WORKSPACE
+        mkdir build
+        cd build
+        brew install cmake ninja libtool gettext llvm@16 gcc binutils grep findutils libiconv
+        export CC=$(brew --prefix llvm@16)/bin/clang
+        export CXX=$(brew --prefix llvm@16)/bin/clang++
+        export PATH=$(brew --prefix llvm@16)/bin:$PATH
+        cmake ..
+        ninja
+        ls -lh programs/proton
+        llvm-strip-16 programs/proton
+        ls -lh programs/proton
+
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: build/programs/proton
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
