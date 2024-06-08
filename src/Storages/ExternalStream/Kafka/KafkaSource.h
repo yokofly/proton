@@ -40,6 +40,9 @@ public:
 
     Chunk generate() override;
 
+protected:
+    void onCancel() override;
+
 private:
     void calculateColumnPositions();
     void initFormatExecutor();
@@ -62,8 +65,6 @@ private:
     const Block non_virtual_header;
     Block physical_header;
     Chunk header_chunk;
-
-    std::shared_ptr<ExpressionActions> convert_non_virtual_to_physical_action = nullptr;
 
     std::unique_ptr<StreamingFormatExecutor> format_executor;
     ReadBufferFromMemory read_buffer;
@@ -89,7 +90,7 @@ private:
 
     /// Indicates that the source has already consumed all messages it is supposed to read [for non-streaming queries].
     bool reached_the_end = false;
-    bool consume_started = false;
+    std::atomic_flag consume_started;
 
     ExternalStreamCounterPtr external_stream_counter;
 

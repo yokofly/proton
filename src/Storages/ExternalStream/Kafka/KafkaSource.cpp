@@ -52,10 +52,12 @@ KafkaSource::KafkaSource(
     , query_context(std::move(query_context_))
     , logger(&Poco::Logger::get(fmt::format("{}.{}", kafka.getLoggerName(), consumer->name())))
 {
+    assert(external_stream_counter);
+
     if (offset > 0)
         setLastProcessedSN(offset - 1);
 
-    assert(external_stream_counter);
+    setStreaming(!high_watermark_.has_value());
 
     if (auto batch_count = query_context->getSettingsRef().record_consume_batch_count; batch_count != 0)
         record_consume_batch_count = static_cast<uint32_t>(batch_count.value);
@@ -75,7 +77,13 @@ KafkaSource::KafkaSource(
 
 KafkaSource::~KafkaSource()
 {
-    if (consume_started)
+    if (!isCancelled())
+        onCancel();
+}
+
+void KafkaSource::onCancel()
+{
+    if (consume_started.test())
     {
         LOG_INFO(logger, "Stop consuming from topic={} shard={}", topic->name(), shard);
         try
@@ -103,11 +111,10 @@ Chunk KafkaSource::generate()
         return {};
     }
 
-    if (!consume_started)
+    if (!consume_started.test_and_set())
     {
         LOG_INFO(logger, "Start consuming from topic={} shard={} offset={} high_watermark={}", topic->name(), shard, offset, high_watermark);
-        consumer->startConsume(*topic, shard, offset);
-        consume_started = true;
+        consumer->startConsume(*topic, shard, offset, /*check_offset=*/is_streaming);
     }
 
     if (result_chunks_with_sns.empty() || iter == result_chunks_with_sns.end())
@@ -165,18 +172,12 @@ void KafkaSource::readAndProcess()
 void KafkaSource::parseMessage(void * rkmessage, size_t  /*total_count*/, void *  /*data*/)
 {
     auto * message = static_cast<rd_kafka_message_t *>(rkmessage);
-
-    if (unlikely(message->offset < offset))
-        /// Ignore the message which has lower offset than what clients like to have
-        return;
-
     parseFormat(message);
 }
 
 void KafkaSource::parseFormat(const rd_kafka_message_t * kmessage)
 {
     assert(format_executor);
-    assert(convert_non_virtual_to_physical_action);
 
     ReadBufferFromMemory buffer(static_cast<const char *>(kmessage->payload), kmessage->len);
     auto new_rows = format_executor->execute(buffer);
@@ -194,9 +195,7 @@ void KafkaSource::parseFormat(const rd_kafka_message_t * kmessage)
     if (!new_rows)
         return;
 
-    auto result_block = non_virtual_header.cloneWithColumns(format_executor->getResultColumns());
-    convert_non_virtual_to_physical_action->execute(result_block);
-
+    auto result_block = physical_header.cloneWithColumns(format_executor->getResultColumns());
     MutableColumns new_data(result_block.mutateColumns());
 
     if (!request_virtual_columns)
@@ -269,20 +268,13 @@ void KafkaSource::initFormatExecutor()
         kafka.getFormatSettings(query_context));
 
     format_executor = std::make_unique<StreamingFormatExecutor>(
-        non_virtual_header,
+        physical_header,
         std::move(input_format),
         [this](const MutableColumns &, Exception & ex) -> size_t
         {
             format_error = ex.what();
             return 0;
         });
-
-    auto converting_dag = ActionsDAG::makeConvertingActions(
-        non_virtual_header.cloneEmpty().getColumnsWithTypeAndName(),
-        physical_header.cloneEmpty().getColumnsWithTypeAndName(),
-        ActionsDAG::MatchColumnsMode::Name);
-
-    convert_non_virtual_to_physical_action = std::make_shared<ExpressionActions>(std::move(converting_dag));
 }
 
 void KafkaSource::calculateColumnPositions()
@@ -403,7 +395,7 @@ void KafkaSource::doRecover(CheckpointContextPtr ckpt_ctx_)
         setLastProcessedSN(recovered_last_sn);
     });
 
-    LOG_INFO(logger, "Recovered last_sn={}", lastProcessedSN());
+    LOG_INFO(logger, "Recovered checkpoint topic={} parition={} last_sn={}", kafka.topicName(), shard, lastProcessedSN());
 }
 
 void KafkaSource::doResetStartSN(Int64 sn)
@@ -411,7 +403,7 @@ void KafkaSource::doResetStartSN(Int64 sn)
     if (sn >= 0)
     {
         offset = sn;
-        LOG_INFO(logger, "Reset start sn={}", offset);
+        LOG_INFO(logger, "Reset offset topic={} parition={} offset={}", kafka.topicName(), shard, offset);
     }
 }
 
