@@ -6,36 +6,65 @@ on:
 
   workflow_dispatch: # Manual trigger
 
+env:
+  build_directory: ${{ github.workspace }}/build
+  build_type: Release
+  release_name: proton
+
 jobs:
   build:
     runs-on: macos-14
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4.1.6
-      with:
-        fetch-depth: 1
-        submodules: true
+      - name: Checkout
+        uses: actions/checkout@v4.1.6
+        with:
+          fetch_depth: 1
+          submodules: true
 
-    - name: Create build directory
-      run: |
-        cd $GITHUB_WORKSPACE
-        mkdir build
-        cd build
-        brew install ccache cmake ninja libtool gettext llvm@16 gcc binutils grep findutils libiconv
-        export CC=$(brew --prefix llvm@16)/bin/clang
-        export CXX=$(brew --prefix llvm@16)/bin/clang++
-        export PATH=$(brew --prefix llvm@16)/bin:$PATH
-        cmake ..
-        ninja
-        ls -lh programs/proton
-        /opt/homebrew/opt/llvm@16/bin/llvm-strip programs/proton
-        ls -lh programs/proton
+      - name: Install dependencies
+        run: |
+          brew install ccache cmake ninja libtool gettext llvm@16 gcc binutils grep findutils libiconv
 
-    - name: Create Release
-      id: create_release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: build/programs/proton
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create build directory
+        run: mkdir -p ${{ env.build_directory }}
+
+      - name: Configure CMake
+        run: |
+          export CC=$(brew --prefix llvm@16)/bin/clang
+          export CXX=$(brew --prefix llvm@16)/bin/clang++
+          export PATH=$(brew --prefix llvm@16)/bin:$PATH
+          cmake -B ${{ env.build_directory }} -G "Ninja" -DCMAKE_BUILD_TYPE=${{ env.build_type }}
+
+      - name: Build with Ninja
+        run: cmake --build ${{ env.build_directory }}
+
+      - name: Strip binary
+        run: |
+          ls -lh ${{ env.build_directory }}/programs/proton
+          /opt/homebrew/opt/llvm@16/bin/llvm-strip ${{ env.build_directory }}/programs/proton
+          ls -lh ${{ env.build_directory }}/programs/proton
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.release_name }}
+          path: ${{ env.build_directory }}/programs/proton
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.release_name }}
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create --generate-notes ${{ env.release_name }} ${{ env.build_directory }}/programs/proton
