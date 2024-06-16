@@ -67,4 +67,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create --generate-notes ${{ env.release_name }} ${{ env.build_directory }}/programs/proton
+          gh release create --generate-notes ${{ env.release_name }} ${{ github.workspace }}
