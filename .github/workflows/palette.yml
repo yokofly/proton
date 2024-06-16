@@ -45,31 +45,30 @@ jobs:
           /opt/homebrew/opt/llvm@16/bin/llvm-strip ${{ env.build_directory }}/programs/proton
           ls -lh ${{ env.build_directory }}/programs/proton
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.release_name }}
-          path: ${{ env.build_directory }}/programs/proton
-
-      - name: List files in the artifact directory
-        run: ls -lh /home/runner/work/proton/  ${{ env.build_directory }}/programs/proton
-
-  release:
-    needs: build
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.release_name }}
-
-      - name: List files in the artifact directory
-        run: ls -l /home/runner/work/proton/proton
+      # - name: Upload Artifact
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: ${{ env.release_name }}
+      #     path: ${{ env.build_directory }}/programs/proton
 
       - name: Create Release
         run: gh release create v1.0 ${{ env.build_directory }}/programs/proton
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  
+  # release:
+  #   needs: build
+  #   runs-on: ubuntu-24.04
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+
+  #     - name: Download Artifact
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: ${{ env.release_name }}
+
+  #     - name: Create Release
+  #       run: gh release create v1.0 ${{ env.build_directory }}/programs/proton
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
