@@ -51,6 +51,9 @@ jobs:
           name: ${{ env.release_name }}
           path: ${{ env.build_directory }}/programs/proton
 
+      - name: List files in the artifact directory
+        run: ls -lh /home/runner/work/proton/  ${{ env.build_directory }}/programs/proton
+
   release:
     needs: build
     runs-on: ubuntu-24.04
@@ -63,8 +66,10 @@ jobs:
         with:
           name: ${{ env.release_name }}
 
-      - name: Create GitHub Release
+      - name: List files in the artifact directory
+        run: ls -l /home/runner/work/proton/proton
+
+      - name: Create Release
+        run: gh release create v1.0 ${{ env.build_directory }}/programs/proton
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create --generate-notes ${{ env.release_name }} ${{ github.workspace }}
