@@ -28,8 +28,9 @@ jobs:
 
       - name: new version cut
         run: |
-          git config --local name "jul11"
-          git config --local email "haohang.shi@timeplus.io"
+          git config --local user.name "jul11"
+          git config --local user.email "haohang.shi@timeplus.io"
+
           ./release version --patch
 
       - name: Create build directory
