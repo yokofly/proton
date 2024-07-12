@@ -26,6 +26,12 @@ jobs:
         run: |
           brew install ccache cmake ninja libtool gettext llvm@16 gcc binutils grep findutils libiconv
 
+      - name: new version cut
+        run: |
+          git config --local name "jul11"
+          git config --local email "haohang.shi@timeplus.io"
+          ./release version --patch
+
       - name: Create build directory
         run: mkdir -p ${{ env.build_directory }}
 
@@ -51,10 +57,10 @@ jobs:
       #     name: ${{ env.release_name }}
       #     path: ${{ env.build_directory }}/programs/proton
 
-      - name: Create Release
-        run: gh release create v1.0 ${{ env.build_directory }}/programs/proton
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # - name: Create Release
+      #   run: gh release create v1.0 ${{ env.build_directory }}/programs/proton
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   
   # release:
   #   needs: build
